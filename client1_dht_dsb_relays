@@ -1,0 +1,226 @@
+
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include "DHT.h"
+
+// Sensor DHT usado
+#define DHTTYPE DHT11   // DHT 11
+//#define DHTTYPE DHT21   // DHT 21 (AM2301)
+//#define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
+
+// Credenciales de red
+const char* ssid = "TvF_6943";
+const char* password = "znid313396291";
+
+// IP del Raspberry Pi / Broker MQTT
+const char* mqtt_server = "192.168.1.15";
+
+// Inicializacion del cliente ESP
+WiFiClient espClient1;
+PubSubClient client(espClient1);
+
+// DHT Sensor - GPIO 5 = D1 del ESP-12E NodeMCU board
+const int DHTPin = 5;
+// DS18B20 Sensor de Temperatura Sumergible GPIO = 4 D2 ESP8266
+
+const int ONE_WIRE_BUS = 4;
+
+//Lamp LEd Builtin
+
+//const int lamp = LED_BUILTIN;
+
+const int relay1 = 8;
+const int relay2 = 7;
+// Configuracion de libreria Onewire para comunicacion con dispositivos Onewire
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pasar la informacion Onewire a Sensor Dallas
+DallasTemperature sensors(&oneWire);
+
+// Inicializacion del DHT 11.
+DHT dht(DHTPin, DHTTYPE);
+
+// Timers auxiliar variables
+long now = millis();
+long lastMeasure = 0;
+
+// Conexion del ESP8266 con el Router
+void setup_wifi() {
+  delay(10);
+  // Conexion Wi Fi
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("WiFi connected - ESP IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+
+// Esta funcion se ejecuta cuando un dispositivo publica un mensaje en el topico que el ESP8266 esta Suscripto
+void callback(String topic, byte* message, unsigned int length) {
+  Serial.print("Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: ");
+  String messageTemp;
+  
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
+
+  // Control de GPIOs mediante MQTT
+
+ 
+  // Si un mensaje llega con el topico control/relays cambia el estado del GPIO de acuerdo al mensaje que llega.
+  if(topic=="control/relays"){
+      Serial.print("Cambiando estado de Rele 1 a ");
+      if(messageTemp == "on1"){
+        digitalWrite(relay1, HIGH);
+        Serial.print("On");
+      }
+      else if(messageTemp == "off1"){
+        digitalWrite(relay1, LOW);
+        Serial.print("Off");
+      }
+       //relay 4
+      if(messageTemp == "on2"){
+        Serial.print("Cambiando  relay 2 a ");
+        digitalWrite(relay4, LOW);
+        Serial.println("Relay 2 On");
+      }
+      else if(messageTemp == "off4"){
+        digitalWrite(relay4, HIGH);
+        Serial.println("Relay 2 Off");
+      }
+  }
+  Serial.println();
+}
+
+// This functions reconnects your ESP8266 to your MQTT broker
+//Esta funcion reconecta al ESP8266 con el MQTT Broker
+// En esta funcion se pueden agregar mas topicos para suscripcion
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    /*
+     YOU MIGHT NEED TO CHANGE THIS LINE, IF YOU'RE HAVING PROBLEMS WITH MQTT MULTIPLE CONNECTIONS
+     To change the ESP device ID, you will have to give a new name to the ESP8266.
+     Here's how it looks:
+       if (client.connect("ESP8266Client")) {
+     You can do it like this:
+       if (client.connect("ESP1_Office")) {
+     Then, for the other ESP:
+       if (client.connect("ESP2_Garage")) {
+      That should solve your MQTT multiple connections problem
+    */
+    if (client.connect("espClient1")) {
+      Serial.println("connected");  
+      // Subscribe or resubscribe to a topic
+      // You can subscribe to more topics (to control more LEDs in this example)
+      client.subscribe("control/relays");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+
+// Se configuran los GPIOs como salidas, y se inicia la comunicacion Serial a una velocidad de 115200 baud
+
+void setup() {
+  //pinMode(lamp, OUTPUT);
+  pinMode(relay1, OUTPUT);
+  pinMode(relay2, OUTPUT);
+  
+  dht.begin();
+  // Start up the library
+  sensors.begin();
+  
+  Serial.begin(115200);
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+
+}
+
+
+//Esta funcion se asegura que el cliente ESP este conectado al Broker
+void loop() {
+
+  if (!client.connected()) {
+    reconnect();
+  }
+  if(!client.loop())
+    client.connect("espClient1");
+
+
+  sensors.requestTemperatures(); 
+  now = millis();
+  // Se publican los valores de Temperatura y humedad cada 30 segundos
+  if (now - lastMeasure > 30000) {
+    lastMeasure = now;
+    float Ts = sensors.getTempCByIndex(0); //Sensor sumergible
+  
+    float h = dht.readHumidity();
+    // Se lee la temperatura en Celsius y Farenheit
+    float t = dht.readTemperature();
+    //Fahrenheit (isFahrenheit = true)
+    float f = dht.readTemperature(true);
+
+    // Se chequean los valores si hay algun error.
+    if (isnan(h) || isnan(t) || isnan(f)) {
+      Serial.println("Failed to read from DHT sensor!");
+      return;
+    }
+
+    // Se computan los valores en Celsius
+    float hic = dht.computeHeatIndex(t, h, false);
+    static char temperatureTemp[7];
+    dtostrf(hic, 6, 2, temperatureTemp);
+    
+    // Para valores en Farenheit quitar los comentarios
+    // float hif = dht.computeHeatIndex(f, h);
+    // static char temperatureTemp[7];
+    // dtostrf(hic, 6, 2, temperatureTemp);
+    
+    static char humidityTemp[7];
+    dtostrf(h, 6, 2, humidityTemp);
+    static char solucionTemp[7];
+    dtostrf(Ts, 6, 2, solucionTemp);
+
+    // Se publican los valores de Temperatura y Humedad en los topicos correspondientes
+    client.publish("sensores/temperatura", temperatureTemp);
+    client.publish("sensores/humedad", humidityTemp);
+    client.publish("sensores/tanque", solucionTemp);
+    Serial.print("Humedad ambiente: ");
+    Serial.print(h);
+    Serial.print(" %\t Temperatura ambiente: ");
+    Serial.print(t);
+    Serial.print(" *C ");
+    //Serial.print(f);
+    //Serial.print(" *F\t Indice de calor: ");
+    //Serial.print(hic);
+    //Serial.print(" *C ");
+    Serial.print("Temperatura de tanque : ");
+  //
+  Serial.print(solucionTemp); 
+  Serial.println(" °C ");
+    // Serial.print(hif);
+    // Serial.println(" *F");
+  }
+} 
