@@ -1,0 +1,46 @@
+#include <Stepper.h>
+
+// Define el número de pasos por revolución del motor
+const int stepsPerRevolution = 2048;
+
+// Inicializa la biblioteca Stepper en los pines que se conectan al ULN2003
+Stepper myStepper(stepsPerRevolution, 8, 10, 9, 11);
+
+// Define los pines de los botones
+const int buttonClockwisePin = 2;
+const int buttonCounterClockwisePin = 3;
+
+// Define el número de pasos para un cuarto de vuelta
+const int quarterTurnSteps = stepsPerRevolution / 4;
+
+void setup() {
+  // Configura la velocidad del motor en RPM
+  myStepper.setSpeed(15);
+  
+  // Configura los pines de los botones como entradas
+  pinMode(buttonClockwisePin, INPUT_PULLUP);
+  pinMode(buttonCounterClockwisePin, INPUT_PULLUP);
+  
+  // Inicia la comunicación serial para depuración
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Lee el estado de los botones
+  int buttonClockwiseState = digitalRead(buttonClockwisePin);
+  int buttonCounterClockwiseState = digitalRead(buttonCounterClockwisePin);
+  
+  // Si el botón de sentido horario está presionado
+  if (buttonClockwiseState == LOW) {
+    Serial.println("Gira un cuarto de vuelta en sentido horario");
+    myStepper.step(quarterTurnSteps);
+    delay(500); // Pequeña pausa para evitar múltiples lecturas del botón
+  }
+  
+  // Si el botón de sentido antihorario está presionado
+  if (buttonCounterClockwiseState == LOW) {
+    Serial.println("Gira un cuarto de vuelta en sentido antihorario");
+    myStepper.step(-quarterTurnSteps);
+    delay(500); // Pequeña pausa para evitar múltiples lecturas del botón
+  }
+}
